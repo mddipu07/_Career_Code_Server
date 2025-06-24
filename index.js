@@ -1,13 +1,22 @@
 const express =require('express')
 const cors = require('cors')
 const app = express()
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser')
 require('dotenv').config()
 const port = process.env.PORT || 3000;
+
+
+const admin = require("firebase-admin");
+const serviceAccount = require("./firebase-admin-service-key.json");
+
+
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 // middleWare
 app.use(cors());
 app.use(express.json());
+
 
 
 
@@ -24,14 +33,58 @@ const client = new MongoClient(uri, {
   }
 });
 
+
+
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+
+
+const verifyFireBaseToken = async (req , res , next) =>{
+      console.log('token in the middleware' , req.headers)
+      const authHeader = req.headers?.authorization;
+  
+      if(!authHeader || !authHeader.startsWith('Bearer ')){
+        return res.status(401).send({messeage: 'unuthorized access'})
+      }
+      const token = authHeader.split(' ')[1];
+
+      try{
+        const decoded = await admin.auth().verifyIdToken(token);
+        req.decoded = decoded;
+        next();
+        console.log('decoded token',decoded);
+      }
+      catch(error){
+        return res.status(401).send({message: 'unauthorized access'})
+      }
+      
+}
+
+
+const verifyTokenEmail = (req,res, next) =>{
+    if(req.query.email !== req.decoded.email){
+       return  res.status(403).send({message: 'forbidden access'})
+    }
+    next();
+}
+
 async function run() {
   try {
  
-    await client.connect();
+    // await client.connect();
 
 
     const jobsCollection = client.db('career-code').collection('jobs');
     const applicationsCollection = client.db('careerCode').collection('applications')
+
+
+
+    // jwt tken related api
+
+
    
    
     app.get('/jobs' , async(req, res) =>{
@@ -52,8 +105,9 @@ async function run() {
     //    const result = await jobsCollection.find(query).toArray()
     //    res.send(result)
     // })
-        app.get('/jobs/applications' , async(req, res) =>{
+        app.get('/jobs/applications' ,verifyFireBaseToken,verifyTokenEmail, async(req, res) =>{
        const email = req.query.email;
+
        const query = {hr_email: email};
        const jobs = await jobsCollection.find(query).toArray();
 
@@ -91,9 +145,13 @@ async function run() {
     // job application related apis
 
 
-    app.get('/applications',async(req,res) =>{
+    app.get('/applications',verifyFireBaseToken,verifyTokenEmail,async(req,res) =>{
        const email = req.query.email;
-       console.log(email);
+       if(email !== req.decoded.email){
+        return res.status(403).message({message: 'forbiden access'})
+       }
+       console.log('req header', req.headers);
+  
        const query = {
         applicant: email 
        }
@@ -144,8 +202,8 @@ async function run() {
       })
 
 
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
  
     // await client.close();
